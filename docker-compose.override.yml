@@ -1,5 +1,6 @@
 version: "3.1"
 services:
     scheduler:
-        volumes: # dbt airflow 볼륨 연동
-            - /home/peter/dev/crawlman/realestate-crawler/realestate_dbt:/usr/local/rs_dbt:ro
+        volumes: # dbt airflow 볼륨 연동(read, write)
+            - /home/peter/dev/crawlman/realestate-crawler/realestate_dbt:/usr/local/rs_dbt:rw
+            - /home/peter/dev/dataman:/usr/local/data:rw # duckdb 용

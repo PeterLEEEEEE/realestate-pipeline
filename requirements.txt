@@ -16,4 +16,9 @@ pytest-cov
 faker
 freezegun
 
+dbt-core
+dbt-duckdb
+dbt-postgres
+# protobuf
+# opentelemetry-proto
 astronomer-cosmos==1.10.2
