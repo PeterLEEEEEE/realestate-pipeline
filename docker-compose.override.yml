@@ -1,6 +1,28 @@
-version: "3.1"
 services:
-    scheduler:
-        volumes: # dbt airflow 볼륨 연동(read, write)
-            - /home/peter/dev/crawlman/realestate-crawler/realestate_dbt:/usr/local/rs_dbt:rw
-            - /home/peter/dev/dataman:/usr/local/data:rw # duckdb 용
+  scheduler:
+    volumes: # dbt airflow 볼륨 연동(read, write)
+        - /home/peter/dev/crawlman/realestate-crawler/realestate_dbt:/usr/local/rs_dbt:rw
+        - /home/peter/dev/dataman:/usr/local/data:rw # duckdb 용
+  postgres_db:
+    image: local/pg18-postgis-pgvector:dev
+    # build:
+    #   context: .
+    #   dockerfile: docker/postgres/Dockerfile
+    container_name: postgres_stg_db
+    environment:
+      TZ: Asia/Seoul
+    env_file:
+      - .env
+    volumes:
+      - postgres_db-data:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5434:5432"
+
+networks:
+  default:
+    external: true
+    name: realestate_network
+
+volumes:
+  postgres_db-data:
