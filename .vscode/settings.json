@@ -1,0 +1,33 @@
+{
+  // Python 인터프리터 (uv 가상환경 사용)
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+
+  // Python 분석 경로 설정 (Airflow plugins 디렉토리 인식)
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/dags",
+    "${workspaceFolder}/plugins",
+    "${workspaceFolder}/src"
+  ],
+
+  // 자동 완성 및 타입 체크 향상
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.autoImportCompletions": true,
+
+  // Pylance 설정
+  "python.languageServer": "Pylance",
+
+  // 파일 제외 (성능 향상)
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    ".astro": true
+  },
+
+  // 검색 제외
+  "search.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    ".astro": true,
+    "uv.lock": true
+  }
+}

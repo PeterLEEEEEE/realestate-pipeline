@@ -1,7 +1,52 @@
 [project]
 name = "crawler-v2"
 version = "0.1.0"
-description = "Add your description here"
+description = "Naver Real Estate API Crawler with Airflow & dbt"
 readme = "README.md"
-requires-python = "<=3.12"
-dependencies = []
+requires-python = ">=3.12,<=3.12.9"
+dependencies = [
+    # Docker에서 추가로 필요한 패키지만 (Astro Runtime에 없는 것)
+    "httpx>=0.27.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+# 로컬 개발 환경용 (모든 의존성 포함)
+local = [
+    "pydantic>=2.0.0",
+    "apache-airflow==3.1.1",
+    "apache-airflow-providers-postgres>=5.0.0",
+    "psycopg2-binary>=2.9.0",
+    "dbt-core>=1.7.0,<2.0.0",
+    "dbt-postgres>=1.7.0,<2.0.0",
+    "astronomer-cosmos==1.10.2",
+]
+
+# 테스트용
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.0.0",
+    "pytest-cov>=4.0.0",
+    "faker>=20.0.0",
+    "freezegun>=1.0.0",
+]
+
+[tool.pyright]
+# Python 버전
+pythonVersion = "3.12"
+
+# 분석할 경로
+include = ["dags", "plugins", "src"]
+
+# 제외할 경로
+exclude = [
+    "**/__pycache__",
+    ".astro",
+    ".venv"
+]
+
+# 추가 검색 경로 (Airflow plugins 인식)
+extraPaths = ["plugins", "dags", "src"]
+
+# 타입 체크 모드
+typeCheckingMode = "basic"

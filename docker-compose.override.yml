@@ -3,6 +3,32 @@ services:
     volumes: # dbt airflow 볼륨 연동(read, write)
         - /home/peter/dev/crawlman/realestate-crawler/realestate_dbt:/usr/local/rs_dbt:rw
         - /home/peter/dev/dataman:/usr/local/data:rw # duckdb 용
+        - ./src:/usr/local/airflow/src:ro  # src 디렉토리 마운트 (읽기 전용)
+    networks:
+      - realestate_network
+
+  api-server:
+    volumes:
+      - ./src:/usr/local/airflow/src:ro
+    networks:
+      - realestate_network
+
+  dag-processor:
+    volumes:
+      - ./src:/usr/local/airflow/src:ro
+    networks:
+      - realestate_network
+
+  triggerer:
+    volumes:
+      - ./src:/usr/local/airflow/src:ro
+    networks:
+      - realestate_network
+
+  postgres:
+    networks:
+      - realestate_network
+
   postgres_db:
     image: local/pg18-postgis-pgvector:dev
     # build:
@@ -18,11 +44,12 @@ services:
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     ports:
       - "5434:5432"
+    networks:
+      - realestate_network
 
 networks:
-  default:
+  realestate_network:
     external: true
-    name: realestate_network
 
 volumes:
   postgres_db-data:

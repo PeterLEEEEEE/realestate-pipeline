@@ -13,10 +13,13 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
  && { [ -e /usr/local/bin/uv ] || ln -s /root/.local/bin/uv /usr/local/bin/uv; } \
  && { [ -e /usr/local/bin/uvx ] || ln -s /root/.local/bin/uvx /usr/local/bin/uvx; }
 
-USER astro
 WORKDIR /usr/local/airflow
 
-# requirements 먼저 복사해서 레이어 캐시 최대화
-COPY requirements.txt ./
-RUN --mount=type=cache,target=/home/astro/.cache/uv \
+# pyproject.toml에서 requirements.txt 생성 후 설치 (단일 소스 관리)
+# ROOT 권한으로 실행하여 시스템 패키지 업데이트 가능
+COPY pyproject.toml ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip compile pyproject.toml -o requirements.txt && \
     uv pip install --system -r requirements.txt
+
+USER astro
