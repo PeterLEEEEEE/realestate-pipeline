@@ -1,3 +1,4 @@
+from json.encoder import py_encode_basestring_ascii
 import time
 import random
 import httpx
@@ -175,40 +176,56 @@ def fetch_articles(complex_id=236):
     return articles
 
 
-def fetch_articles_paged(
+def fetch_articles_for_areas(
     client: httpx.Client,
     complex_id: int | str,
+    area_nos: list[int],
     trade_type: str = "A1",
-    max_pages: int = 3, # 페이지 당 20개
-    sleep_ms_min: int = 200,
-    sleep_ms_max: int = 500,
+    max_pages: int = 3, # 지금은 안쓰긴 하는데 rate limit 때문에 일단 남겨둠
+    sleep_ms_min: int = 10,
+    sleep_ms_max: int = 15,
 ) -> list[dict]:
     """
-    단일 complex에 대해 최대 max_pages까지 페이지를 호출하여 기사 배열을 반환.
-    응답의 isMoreData가 False면 조기 종료. 페이지 간 랜덤 sleep 포함.
+    단일 complex의 특정 평형들(area_nos)에 대해 매물 리스트 수집.
+
+    Args:
+        client: HTTP 클라이언트
+        complex_id: 단지 ID
+        area_nos: 평형 번호 리스트 (예: [1, 2, 3, 4, 5])
+        trade_type: 거래 타입 (A1: 매매, B1: 전월세)
+        max_pages: 최대 페이지 수
+        sleep_ms_min: 최소 sleep 시간 (ms)
+        sleep_ms_max: 최대 sleep 시간 (ms)
+
+    Returns:
+        매물 리스트 (가격 히스토리 없음, 원본 데이터)
     """
-    all_articles: list[dict] = []
-    for page_no in range(1, max_pages + 1):
-        url = f"{BASE_URL + complex_articles_url.format(complex_no=complex_id, trade_type=trade_type, page_no=page_no, order_type='prc')}"
+    articles = []
+    area_nos_str = ":".join(map(str, area_nos))
+    page_no = 1
+
+    while True:
+        url = f"{BASE_URL + complex_articles_url.format(complex_no=complex_id, trade_type=trade_type, area_nos=area_nos_str, page_no=page_no, order_type='prc')}"
         try:
             resp = client.get(url)
             resp.raise_for_status()
             data = resp.json()
-            articles = data.get("articleList", [])
+            article_list = data.get("articleList", [])
         except httpx.HTTPError:
             break
 
-        if not articles:
+        if not article_list:
             break
 
-        all_articles.extend(articles)
+        articles.extend(article_list)
 
         if data.get("isMoreData") is False:
             break
 
-        time.sleep(random.randint(sleep_ms_min, sleep_ms_max) / 1000.0)
+        page_no += 1
+        time.sleep(random.randint(sleep_ms_min, sleep_ms_max))
 
-    return all_articles
+    return articles
 
 def fetch_article_price_history(
     client: httpx.Client,
@@ -225,6 +242,69 @@ def fetch_article_price_history(
         return resp.json()
     except httpx.HTTPError:
         return []
+
+
+def enrich_articles_with_price_history(
+    client: httpx.Client,
+    articles: list[dict],
+    complex_id: int | str,
+) -> list[dict]:
+    """
+    매물 리스트에 가격 히스토리를 추가하고 날짜 필드를 변환.
+
+    Args:
+        client: HTTP 클라이언트
+        articles: 매물 리스트 (fetch_articles_paged 결과)
+        complex_id: 단지 ID
+
+    Returns:
+        가격 히스토리와 날짜 변환이 완료된 매물 리스트
+    """
+    from datetime import timedelta
+
+    enriched = []
+
+    for article in articles:
+        article_no = article.get("articleNo")
+        if article_no is None:
+            continue
+
+        # 가격 변동이 있으면 히스토리 API 호출
+        initial_price = None
+        price_history_list = []
+        if article.get("priceChangeState") != "SAME":
+            history = fetch_article_price_history(
+                client=client,
+                article_no=article_no,
+            )
+            if isinstance(history, dict):
+                initial_price = history.get("initialPrice")
+                price_history_list = history.get("priceHistoryList") or []
+
+            time.sleep(random.randint(2, 5))
+        
+        # payload 구성
+        payload = {**article}
+        if initial_price is not None:
+            payload["initialPrice"] = initial_price
+        if price_history_list:
+            payload["priceHistoryList"] = price_history_list
+        if not payload.get("complexNo"):
+            payload["complexNo"] = str(complex_id)
+
+        # articleConfirmYmd를 datetime으로 변환
+        ymd = payload.get("articleConfirmYmd")
+        if isinstance(ymd, str) and len(ymd) == 8 and ymd.isdigit():
+            try:
+                confirm_dt = datetime.strptime(ymd, "%Y%m%d")
+                payload["articleConfirmDate"] = confirm_dt
+                payload["expireAt"] = confirm_dt + timedelta(days=28)
+            except Exception:
+                pass
+
+        enriched.append(payload)
+
+    return enriched
 
 
 def fetch_complex_detail(
@@ -255,8 +335,8 @@ def fetch_complex_real_price(
     pyeong_infos: list[dict],
     pyeong_cnt: int,
     trade_type: str = "A1",
-    sleep_min_sec: int = 1,
-    sleep_max_sec: int = 3
+    sleep_min_sec: int = 2,
+    sleep_max_sec: int = 5
 ) -> list[dict]:
     """
     단일 complex의 실거래가 정보를 반환.
@@ -282,25 +362,26 @@ def fetch_complex_real_price(
                 total_row_count = data.get("totalRowCount", 0)
 
                 sold_month_list = data.get('realPriceOnMonthList', [])
+                if not sold_month_list:
+                    break
+                
+                for sold_month_info in sold_month_list:
+                    trade_base_year = sold_month_info.get("tradeBaseYear", '0')
+                    if trade_base_year == '2025':
 
-                if sold_month_list:
-                    for sold_month_info in sold_month_list:
-                        trade_base_year = sold_month_info.get("tradeBaseYear", '0')
-                        if trade_base_year == '2025':
+                        for sold_info in sold_month_info.get("realPriceList", []):
+                            if sold_info.get("deleteYn"):
+                                continue
 
-                            for sold_info in sold_month_info.get("realPriceList", []):
-                                if sold_info.get("deleteYn"):
-                                    continue
-
-                                sold_info['complexNo'] = complex_no
-                                sold_info['areaNo'] = area_no
-                                sold_info['pyeong'] = pyeong_dict.get("pyeongName2", "")
-                                result.append(sold_info)
-                        else:
-                            # 2025년이 아니면 이 평형의 데이터 수집 종료
-                            current_year = trade_base_year
-                            break
-
+                            sold_info['complexNo'] = complex_no
+                            sold_info['areaNo'] = area_no
+                            sold_info['pyeong'] = pyeong_dict.get("pyeongName2", "")
+                            result.append(sold_info)
+                    else:
+                        # 2025년이 아니면 이 평형의 데이터 수집 종료
+                        current_year = trade_base_year
+                        break
+                
                 # 모든 데이터를 가져왔으면 다음 평형으로
                 if added_row_count >= total_row_count or current_year != '2025':
                     break
@@ -312,6 +393,243 @@ def fetch_complex_real_price(
             except httpx.HTTPError:
                 break  # 이 평형은 에러로 종료, 다음 평형으로
         
-    
-    
+
+
+    return result
+
+# 로직 설계 상 안씀
+def fetch_complex_real_price_current_month(
+    client: httpx.Client,
+    complex_no: int | str,
+    pyeong_infos: list[dict],
+    pyeong_cnt: int,
+    target_year: str,
+    target_month: str,
+    target_day: int,
+    trade_type: str = "A1",
+    sleep_min_sec: int = 2,
+    sleep_max_sec: int = 5
+) -> list[dict]:
+    """
+    단일 complex의 실거래가 정보를 현재 연월일 기준으로 필터링하여 반환.
+
+    Args:
+        client: HTTP 클라이언트
+        complex_no: 단지 번호
+        pyeong_infos: 평형 정보 리스트
+        pyeong_cnt: 평형 개수
+        target_year: 수집 대상 년도 (예: "2025")
+        target_month: 수집 대상 월 (예: "11")
+        target_day: 수집 대상 일 (이 날짜까지의 데이터만 수집, 예: 3)
+        trade_type: 거래 타입 (A1: 매매)
+        sleep_min_sec: 최소 sleep 시간 (초)
+        sleep_max_sec: 최대 sleep 시간 (초)
+
+    Returns:
+        필터링된 실거래가 리스트
+
+    Example:
+        # 2025년 11월 3일까지의 데이터만 수집
+        fetch_complex_real_price_current_month(
+            client, complex_no, pyeong_infos, pyeong_cnt,
+            target_year="2025",
+            target_month="11",
+            target_day=3
+        )
+    """
+
+    if pyeong_cnt <= 0:
+        return []
+
+    result = []
+
+    for pyeong_dict in pyeong_infos:
+        area_no = pyeong_dict.get("pyeongNo", 1)
+        row_count = 0  # 각 평형마다 0부터 시작
+
+        while True:
+            url = f"{BASE_URL + complex_real_price_url.format(complex_no=complex_no, trade_type=trade_type, area_no=area_no, row_count=row_count)}"
+
+            try:
+                resp = client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+                added_row_count = data.get("addedRowCount", 0)
+                total_row_count = data.get("totalRowCount", 0)
+
+                sold_month_list = data.get('realPriceOnMonthList', [])
+                if not sold_month_list:
+                    break
+
+                found_target_month = False
+                found_other_month_after_target = False
+
+                for sold_month_info in sold_month_list:
+                    trade_base_year = sold_month_info.get("tradeBaseYear", '0')
+                    trade_base_month = sold_month_info.get("tradeBaseMonth", '0')
+
+                    # 대상 연, 월과 일치하는 경우만 처리
+                    if trade_base_year == target_year and trade_base_month == target_month:
+                        found_target_month = True
+
+                        for sold_info in sold_month_info.get("realPriceList", []):
+                            if sold_info.get("deleteYn"): # 계약 취소된 매물은 무시
+                                continue
+
+                            # tradeDate가 target_day 이하인 경우만 수집
+                            trade_date_str = sold_info.get("tradeDate", "0")
+                            try:
+                                trade_date = int(trade_date_str)
+                            except (ValueError, TypeError):
+                                continue
+
+                            if trade_date == target_day: # 연, 월, 일이 모두 같은 경우만 저장
+                                sold_info['complexNo'] = complex_no
+                                sold_info['areaNo'] = area_no
+                                sold_info['pyeong'] = pyeong_dict.get("pyeongName2", "")
+                                result.append(sold_info)
+                    elif found_target_month:
+                        # 대상 월을 이미 찾았는데 다른 월이 나왔다면
+                        # 더 이상 대상 월 데이터가 없으므로 이 평형 수집 종료
+                        found_other_month_after_target = True
+                        break
+
+                # 대상 월 이후 다른 월이 나왔거나, 모든 데이터를 가져왔으면 다음 평형으로
+                if found_other_month_after_target or added_row_count >= total_row_count:
+                    break
+
+                # 다음 페이지를 위해 row_count 업데이트
+                row_count = added_row_count
+                time.sleep(random.randint(sleep_min_sec, sleep_max_sec))
+
+            except httpx.HTTPError:
+                break  # 이 평형은 에러로 종료, 다음 평형으로
+
+    return result
+
+
+def fetch_complex_real_price_range(
+    client: httpx.Client,
+    complex_no: int | str,
+    pyeong_infos: list[dict],
+    pyeong_cnt: int,
+    start_year: str,
+    start_month: str,
+    start_day: int,
+    end_year: str,
+    end_month: str,
+    end_day: int,
+    trade_type: str = "A1",
+    sleep_min_sec: int = 2,
+    sleep_max_sec: int = 5
+) -> list[dict]:
+    """
+    단일 complex의 실거래가 정보를 날짜 범위 기준으로 수집.
+
+    Args:
+        client: HTTP 클라이언트
+        complex_no: 단지 번호
+        pyeong_infos: 평형 정보 리스트
+        pyeong_cnt: 평형 개수
+        start_year: 시작 년도 (예: "2025")
+        start_month: 시작 월 (예: "10")
+        start_day: 시작 일 (예: 29)
+        end_year: 종료 년도 (예: "2025")
+        end_month: 종료 월 (예: "11")
+        end_day: 종료 일 (예: 3)
+        trade_type: 거래 타입 (A1: 매매)
+        sleep_min_sec: 최소 sleep 시간 (초)
+        sleep_max_sec: 최대 sleep 시간 (초)
+
+    Returns:
+        날짜 범위 내 실거래가 리스트
+
+    Example:
+        # 2025년 10월 29일 ~ 11월 3일 데이터 수집
+        fetch_complex_real_price_range(
+            client, complex_no, pyeong_infos, pyeong_cnt,
+            start_year="2025", start_month="10", start_day=29,
+            end_year="2025", end_month="11", end_day=3
+        )
+    """
+
+    if pyeong_cnt <= 0:
+        return []
+
+    result = []
+
+    # 시작/종료 날짜를 정수로 변환 (비교 편의)
+    start_date_int = int(start_year) * 10000 + int(start_month) * 100 + start_day
+    end_date_int = int(end_year) * 10000 + int(end_month) * 100 + end_day
+
+    for pyeong_dict in pyeong_infos:
+        area_no = pyeong_dict.get("pyeongNo", 1)
+        row_count = 0
+
+        while True:
+            url = f"{BASE_URL + complex_real_price_url.format(complex_no=complex_no, trade_type=trade_type, area_no=area_no, row_count=row_count)}"
+
+            try:
+                resp = client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+                added_row_count = data.get("addedRowCount", 0)
+                total_row_count = data.get("totalRowCount", 0)
+
+                sold_month_list = data.get('realPriceOnMonthList', [])
+                if not sold_month_list:
+                    break
+
+                stop_collection = False
+
+                for sold_month_info in sold_month_list:
+                    trade_base_year = sold_month_info.get("tradeBaseYear", '0')
+                    trade_base_month = sold_month_info.get("tradeBaseMonth", '0')
+
+                    try:
+                        month_date_int = int(trade_base_year) * 10000 + int(trade_base_month) * 100
+                    except (ValueError, TypeError):
+                        continue
+
+                    # 범위보다 미래 월 → 스킵
+                    if month_date_int > end_date_int:
+                        continue
+
+                    # 범위보다 과거 월 → 종료
+                    if month_date_int < (int(start_year) * 10000 + int(start_month) * 100):
+                        stop_collection = True
+                        break
+
+                    # 범위 내 월 → 데이터 수집
+                    for sold_info in sold_month_info.get("realPriceList", []):
+                        if sold_info.get("deleteYn"):
+                            continue
+
+                        trade_date_str = sold_info.get("tradeDate", "0")
+                        try:
+                            trade_date = int(trade_date_str)
+                        except (ValueError, TypeError):
+                            continue
+
+                        # 전체 날짜를 정수로 변환
+                        full_date_int = month_date_int + trade_date
+
+                        # 범위 체크
+                        if start_date_int <= full_date_int <= end_date_int:
+                            sold_info['complexNo'] = complex_no
+                            sold_info['areaNo'] = area_no
+                            sold_info['pyeong'] = pyeong_dict.get("pyeongName2", "")
+                            result.append(sold_info)
+
+                # 종료 조건
+                if stop_collection or added_row_count >= total_row_count:
+                    break
+
+                # 다음 페이지
+                row_count = added_row_count
+                time.sleep(random.randint(sleep_min_sec, sleep_max_sec))
+
+            except httpx.HTTPError:
+                break
+
     return result

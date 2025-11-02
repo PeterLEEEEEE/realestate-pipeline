@@ -12,7 +12,7 @@ from operators.api_to_postgres_ops import (
 @dag(
     dag_id="dags_realestate_api_to_postgres",
     start_date=datetime(2023, 4, 1, tz="Asia/Seoul"),
-    schedule="0 22 * * *",
+    schedule="0 23 * * *",
     catchup=False,
     tags=["realestate", "daily", "postgres"],
     description="네이버 부동산 API에서 매일 매물, 단지상세, 실거래가 데이터 수집",
@@ -44,15 +44,15 @@ def realestate_api_postgres_dag():
         #     trade_type="A1",  # 매매
         #     pool="api_pool",  # API rate limiting
         #     max_pages=5,
-        #     page_sleep_ms_min=200,
-        #     page_sleep_ms_max=500,
+        #     page_sleep_ms_min=10,
+        #     page_sleep_ms_max=15,
         #     retries=3,
         #     retry_delay=duration(minutes=5),
         #     retry_exponential_backoff=True,
         #     max_retry_delay=duration(minutes=30),
         # ).expand(complex_nos=id_chunks)
 
-        # # 4. 단지 상세정보 수집 (동적 Task Mapping)
+        # 4. 단지 상세정보 수집 (동적 Task Mapping)
         # ComplexDetailPostgresOperator.partial(
         #     task_id="fetch_complex_detail_postgres",
         #     postgres_conn_id="postgres_default",
@@ -61,14 +61,17 @@ def realestate_api_postgres_dag():
         #     retry_delay=duration(minutes=5),
         # ).expand(complex_nos=id_chunks)
 
-        # 5. 실거래가 수집 (동적 Task Mapping)
-        RealPricePostgresOperator.partial(
-            task_id="fetch_real_prices_postgres",
-            postgres_conn_id="postgres_default",
-            pool="api_pool",  # API rate limiting
-            retries=1,
-            retry_delay=duration(minutes=5),
-        ).expand(complex_nos=[[236]])
+        # 5. 실거래가 배치 수집 (동적 Task Mapping)
+        # RealPricePostgresOperator.partial(
+        #     task_id="fetch_real_prices_postgres",
+        #     postgres_conn_id="postgres_default",
+        #     pool="api_pool",  # API rate limiting
+        #     retries=1,
+        #     sleep_min_sec=2,
+        #     sleep_max_sec=5,
+        #     filter_by_execution_date=False, 
+        #     retry_delay=duration(minutes=5),
+        # ).expand(complex_nos=id_chunks)
 
     realestate_api_pipeline()
 

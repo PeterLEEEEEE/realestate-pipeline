@@ -7,12 +7,12 @@ complex_name_url = "/search?keyword={region_name}&page={page_no}"
 complex_metadata_url = "/complexes/overview/{complex_no}"
 
 # 아파트의 매물 리스트 API
-complex_articles_url = "/articles/complex/{complex_no}?tradeType={trade_type}&page={page_no}&sameAddressGroup=True&type=list&order={order_type}"
+complex_articles_url = "/articles/complex/{complex_no}?tradeType={trade_type}&page={page_no}&sameAddressGroup=True&areaNos={area_nos}&type=list&order={order_type}"
 
 # 아파트 매물 상세 API
 complex_article_detail_url = "/articles/{article_no}"
 
-# 아파트 상하한가 API
+# 아파트 상하한가 API 사실상 의미 없어서 사용 x 
 complex_limit_price_url = "/complexes/{complex_no}/prices?complexNo={complex_no}&tradeType={trade_type}&year={year}&priceChartChange=true&areaNo={area_no}&areaChange=true&type=table"
 
 # 아파트 실거래가 API(중요)
