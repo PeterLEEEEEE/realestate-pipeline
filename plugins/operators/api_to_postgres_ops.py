@@ -63,8 +63,8 @@ class ApiToPostgresOperator(BaseOperator):
                     self.log.warning("complex=%s has no valid pyeongNo, skipping", cid)
                     continue
 
-                # 평형을 4개씩 chunk로 나누기
-                chunk_size = 4
+                # 평형을 5개씩 chunk로 나누기
+                chunk_size = 5
                 chunks = [pyeong_nums[i:i+chunk_size] for i in range(0, len(pyeong_nums), chunk_size)]
 
                 complex_total = 0
@@ -199,11 +199,9 @@ class RealPricePostgresOperator(BaseOperator):
         self.filter_by_execution_date = filter_by_execution_date
 
     def execute(self, context):
-        from datetime import timedelta
-
         from src.core.fetch import (
             fetch_complex_real_price,
-            fetch_complex_real_price_range,
+            fetch_complex_real_price_recent,
         )
         from src.utils.headers import get_cookies_headers
 
@@ -218,23 +216,23 @@ class RealPricePostgresOperator(BaseOperator):
         cookies, headers = get_cookies_headers()
 
         # execution_date 기준 연월일 추출 (한국 시간 기준)
-        end_year = None
-        end_month = None
-        end_day = None
+        exec_year = None
+        exec_month = None
+        exec_day = None
         if self.filter_by_execution_date:
             # data_interval_end 또는 execution_date 사용
             exec_date = context.get("data_interval_end") or context.get("execution_date")
             if exec_date:
                 # 한국 시간(KST, UTC+9)으로 변환
                 kst_date = exec_date.in_timezone("Asia/Seoul")
-                end_year = str(kst_date.year)
-                end_month = str(kst_date.month)
-                end_day = kst_date.day
+                exec_year = str(kst_date.year)
+                exec_month = str(kst_date.month)
+                exec_day = kst_date.day
                 self.log.info(
-                    "Incremental collection mode - end date (KST): %s-%s-%s",
-                    end_year,
-                    end_month,
-                    end_day,
+                    "Incremental collection mode - execution date (KST): %s-%s-%s",
+                    exec_year,
+                    exec_month,
+                    exec_day,
                 )
             else:
                 self.log.warning("filter_by_execution_date=True but no execution_date in context")
@@ -249,63 +247,28 @@ class RealPricePostgresOperator(BaseOperator):
 
                 pyeong_cnt = len(pyeong_infos)
 
-                # 증분 수집 모드
-                if self.filter_by_execution_date and end_year and end_month and end_day:
-                    # 단지의 가장 최근 수집 날짜 조회 (첫번째 평형 기준)
-                    first_area_no = str(pyeong_infos[0].get("pyeongNo", "1"))
-                    last_collected = pg_hook.get_last_collected_date(complex_no, first_area_no)
+                # 증분 수집 모드: 지난 달 1일 ~ 실행일 (2개월)
+                if self.filter_by_execution_date and exec_year and exec_month and exec_day:
+                    self.log.info(
+                        "complex=%s incremental collection: last month + current month up to %s-%s-%s",
+                        complex_no,
+                        exec_year,
+                        exec_month,
+                        exec_day,
+                    )
 
-                    if last_collected:
-                        # 마지막 수집일 + 1일부터 오늘까지
-                        last_year, last_month, last_day = last_collected
-
-                        # 다음날 계산
-                        from datetime import date
-                        last_date = date(int(last_year), int(last_month), last_day)
-                        start_date = last_date + timedelta(days=1)
-
-                        start_year = str(start_date.year)
-                        start_month = str(start_date.month)
-                        start_day = start_date.day
-
-                        self.log.info(
-                            "complex=%s incremental collection: %s-%s-%s ~ %s-%s-%s",
-                            complex_no,
-                            start_year,
-                            start_month,
-                            start_day,
-                            end_year,
-                            end_month,
-                            end_day,
-                        )
-
-                        complex_sold_infos = fetch_complex_real_price_range(
-                            client=client,
-                            complex_no=complex_no,
-                            pyeong_infos=pyeong_infos,
-                            pyeong_cnt=pyeong_cnt,
-                            start_year=start_year,
-                            start_month=start_month,
-                            start_day=start_day,
-                            end_year=end_year,
-                            end_month=end_month,
-                            end_day=end_day,
-                            trade_type=self.trade_type,
-                            sleep_min_sec=self.sleep_min_sec,
-                            sleep_max_sec=self.sleep_max_sec,
-                        )
-                    else:
-                        # 첫 수집 → 전체 수집
-                        self.log.info("complex=%s first collection (no previous data)", complex_no)
-                        complex_sold_infos = fetch_complex_real_price(
-                            client=client,
-                            complex_no=complex_no,
-                            pyeong_infos=pyeong_infos,
-                            pyeong_cnt=pyeong_cnt,
-                            trade_type=self.trade_type,
-                            sleep_min_sec=self.sleep_min_sec,
-                            sleep_max_sec=self.sleep_max_sec,
-                        )
+                    complex_sold_infos = fetch_complex_real_price_recent(
+                        client=client,
+                        complex_no=complex_no,
+                        pyeong_infos=pyeong_infos,
+                        pyeong_cnt=pyeong_cnt,
+                        execution_year=exec_year,
+                        execution_month=exec_month,
+                        execution_day=exec_day,
+                        trade_type=self.trade_type,
+                        sleep_min_sec=self.sleep_min_sec,
+                        sleep_max_sec=self.sleep_max_sec,
+                    )
 
                     self.log.info(
                         "complex=%s collected=%s",
@@ -313,7 +276,7 @@ class RealPricePostgresOperator(BaseOperator):
                         len(complex_sold_infos),
                     )
                 else:
-                    # 전체 수집 모드
+                    # 전체 수집 모드 (2023년부터)
                     complex_sold_infos = fetch_complex_real_price(
                         client=client,
                         complex_no=complex_no,

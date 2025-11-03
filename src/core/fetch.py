@@ -339,18 +339,20 @@ def fetch_complex_real_price(
     sleep_max_sec: int = 5
 ) -> list[dict]:
     """
-    단일 complex의 실거래가 정보를 반환.
+    단일 complex의 실거래가 정보를 2023년부터 현재까지 전체 수집.
+    초기 데이터 수집용.
     """
 
     if pyeong_cnt <= 0:
         return []
-    
+
     result = []
-    
+    min_year = 2023  # 2023년부터 수집
+
     for pyeong_dict in pyeong_infos:
         area_no = pyeong_dict.get("pyeongNo", 1)
         row_count = 0  # 각 평형마다 0부터 시작
-        current_year = '2025'
+
         while True:
             url = f"{BASE_URL + complex_real_price_url.format(complex_no=complex_no, trade_type=trade_type, area_no=area_no, row_count=row_count)}"
 
@@ -364,11 +366,18 @@ def fetch_complex_real_price(
                 sold_month_list = data.get('realPriceOnMonthList', [])
                 if not sold_month_list:
                     break
-                
+
+                stop_collection = False
                 for sold_month_info in sold_month_list:
                     trade_base_year = sold_month_info.get("tradeBaseYear", '0')
-                    if trade_base_year == '2025':
 
+                    try:
+                        year_int = int(trade_base_year)
+                    except (ValueError, TypeError):
+                        continue
+
+                    # 2023년 이상인 경우만 수집
+                    if year_int >= min_year:
                         for sold_info in sold_month_info.get("realPriceList", []):
                             if sold_info.get("deleteYn"):
                                 continue
@@ -377,13 +386,13 @@ def fetch_complex_real_price(
                             sold_info['areaNo'] = area_no
                             sold_info['pyeong'] = pyeong_dict.get("pyeongName2", "")
                             result.append(sold_info)
-                    else:
-                        # 2025년이 아니면 이 평형의 데이터 수집 종료
-                        current_year = trade_base_year
+                    elif year_int < min_year:
+                        # 2023년 이전 데이터 발견 시 수집 종료
+                        stop_collection = True
                         break
-                
-                # 모든 데이터를 가져왔으면 다음 평형으로
-                if added_row_count >= total_row_count or current_year != '2025':
+
+                # 종료 조건
+                if stop_collection or added_row_count >= total_row_count:
                     break
 
                 # 다음 페이지를 위해 row_count 업데이트
@@ -392,8 +401,6 @@ def fetch_complex_real_price(
 
             except httpx.HTTPError:
                 break  # 이 평형은 에러로 종료, 다음 평형으로
-        
-
 
     return result
 
@@ -508,59 +515,73 @@ def fetch_complex_real_price_current_month(
     return result
 
 
-def fetch_complex_real_price_range(
+def fetch_complex_real_price_recent(
     client: httpx.Client,
     complex_no: int | str,
     pyeong_infos: list[dict],
     pyeong_cnt: int,
-    start_year: str,
-    start_month: str,
-    start_day: int,
-    end_year: str,
-    end_month: str,
-    end_day: int,
+    execution_year: str,
+    execution_month: str,
+    execution_day: int,
     trade_type: str = "A1",
     sleep_min_sec: int = 2,
     sleep_max_sec: int = 5
 ) -> list[dict]:
     """
-    단일 complex의 실거래가 정보를 날짜 범위 기준으로 수집.
+    단일 complex의 실거래가 정보를 지난 달 1일부터 실행일까지 수집 (증분 수집용).
+
+    지난 달 전체 + 현재 달 (1일~실행일) 데이터를 수집합니다.
 
     Args:
         client: HTTP 클라이언트
         complex_no: 단지 번호
         pyeong_infos: 평형 정보 리스트
         pyeong_cnt: 평형 개수
-        start_year: 시작 년도 (예: "2025")
-        start_month: 시작 월 (예: "10")
-        start_day: 시작 일 (예: 29)
-        end_year: 종료 년도 (예: "2025")
-        end_month: 종료 월 (예: "11")
-        end_day: 종료 일 (예: 3)
+        execution_year: 실행 년도 (예: "2025")
+        execution_month: 실행 월 (예: "11")
+        execution_day: 실행 일 (예: 3)
         trade_type: 거래 타입 (A1: 매매)
         sleep_min_sec: 최소 sleep 시간 (초)
         sleep_max_sec: 최대 sleep 시간 (초)
 
     Returns:
-        날짜 범위 내 실거래가 리스트
+        지난 달 1일부터 실행일까지의 실거래가 리스트
 
     Example:
-        # 2025년 10월 29일 ~ 11월 3일 데이터 수집
-        fetch_complex_real_price_range(
+        # 실행일이 2025년 11월 3일인 경우
+        # 2025년 10월 1일 ~ 2025년 11월 3일 데이터 수집
+        fetch_complex_real_price_recent(
             client, complex_no, pyeong_infos, pyeong_cnt,
-            start_year="2025", start_month="10", start_day=29,
-            end_year="2025", end_month="11", end_day=3
+            execution_year="2025", execution_month="11", execution_day=3
         )
     """
+    from datetime import date, timedelta
 
     if pyeong_cnt <= 0:
         return []
 
-    result = []
+    # 실행일 생성
+    exec_date = date(int(execution_year), int(execution_month), execution_day)
+
+    # 지난 달 1일 계산
+    first_of_current_month = exec_date.replace(day=1)
+    last_month_last_day = first_of_current_month - timedelta(days=1)
+    first_of_last_month = last_month_last_day.replace(day=1)
+
+    # 날짜 범위 설정: 지난 달 1일 ~ 실행일
+    start_year = str(first_of_last_month.year)
+    start_month = str(first_of_last_month.month)
+    start_day = 1
+
+    end_year = execution_year
+    end_month = execution_month
+    end_day = execution_day
 
     # 시작/종료 날짜를 정수로 변환 (비교 편의)
     start_date_int = int(start_year) * 10000 + int(start_month) * 100 + start_day
     end_date_int = int(end_year) * 10000 + int(end_month) * 100 + end_day
+
+    result = []
 
     for pyeong_dict in pyeong_infos:
         area_no = pyeong_dict.get("pyeongNo", 1)

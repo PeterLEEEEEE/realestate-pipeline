@@ -40,18 +40,18 @@ COMPLEX_DETAILS_DDL = """
 REAL_PRICE_DDL = """
     CREATE SCHEMA IF NOT EXISTS raw;
     CREATE TABLE IF NOT EXISTS raw.real_prices (
-        trade_id TEXT PRIMARY KEY,
         complex_no TEXT NOT NULL,
         area_no TEXT NOT NULL,
         floor TEXT,
         deal_price TEXT,
-        formatted_trade_year_month TEXT NOT NULL,
+        trade_date DATE NOT NULL,
         payload JSONB NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (complex_no, area_no, floor, deal_price, trade_date)
     );
     CREATE INDEX IF NOT EXISTS idx_real_prices_complex_no ON raw.real_prices(complex_no);
     CREATE INDEX IF NOT EXISTS idx_real_prices_area_no ON raw.real_prices(area_no);
-    CREATE INDEX IF NOT EXISTS idx_real_prices_formatted_trade_year_month ON raw.real_prices(formatted_trade_year_month);
+    CREATE INDEX IF NOT EXISTS idx_real_prices_trade_date ON raw.real_prices(trade_date);
     CREATE INDEX IF NOT EXISTS idx_real_prices_created_at ON raw.real_prices(created_at);
 """

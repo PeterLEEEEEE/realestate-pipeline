@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Any, Mapping
@@ -228,7 +227,8 @@ class CustomPostgresHook(BaseHook):
         """
         실거래가 데이터 삽입 (raw layer)
 
-        각 거래 데이터에 고유한 ID 생성 (complexNo_tradeType_YYYYMMDD_randomHash)
+        UNIQUE 제약으로 중복 방지 (complex_no, area_no, floor, deal_price, trade_date)
+        중복 시 ON CONFLICT DO NOTHING으로 무시
         """
         if not docs:
             return
@@ -238,27 +238,43 @@ class CustomPostgresHook(BaseHook):
 
         now = datetime.now(timezone.utc)
         records = []
+        skipped_count = 0
         for doc in docs:
             complex_no = doc.get("complexNo") or doc.get("complex_no")
             area_no = doc.get("areaNo") or doc.get("area_no")
             formatted = doc.get("formattedTradeYearMonth") or doc.get("formatted_trade_year_month")
-            if complex_no is None or area_no is None or formatted is None:
+            trade_date_str = doc.get("tradeDate")
+
+            if complex_no is None or area_no is None or formatted is None or trade_date_str is None:
+                skipped_count += 1
+                if skipped_count == 1:  # 첫 스킵 데이터만 로그
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Skipping record - complexNo: {complex_no}, areaNo: {area_no}, formatted: {formatted}, tradeDate: {trade_date_str}")
+                    logger.warning(f"Available keys: {list(doc.keys())}")
+                    logger.warning(f"Sample data: {dict(list(doc.items())[:10])}")
                 continue
 
             floor = doc.get("floor")
             deal_price = doc.get("dealPrice") or doc.get("deal_price")
 
-            # ID 생성
-            record_id = self._generate_real_price_id(doc)
+            # trade_date 생성: formattedTradeYearMonth (2025.10.21) → 2025-10-21
+            try:
+                trade_date = formatted.replace(".", "-")  # "2025.10.21" -> "2025-10-21"
+
+                # 날짜 유효성 검증
+                from datetime import date as dt_date
+                dt_date.fromisoformat(trade_date)  # 유효하지 않으면 ValueError
+            except (ValueError, AttributeError):
+                continue
 
             records.append(
                 (
-                    record_id,
                     str(complex_no),
                     str(area_no),
                     None if floor is None else str(floor),
                     None if deal_price is None else str(deal_price),
-                    str(formatted),
+                    trade_date,
                     Json(self._json_ready(doc)),
                     now,
                     now,
@@ -266,25 +282,33 @@ class CustomPostgresHook(BaseHook):
             )
 
         if not records:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"No valid records to insert. Total docs: {len(docs)}, Skipped: {skipped_count}")
             return
+
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Inserting {len(records)} real_price records (skipped {skipped_count} invalid records)")
 
         insert_sql = """
             INSERT INTO raw.real_prices (
-                trade_id,
                 complex_no,
                 area_no,
                 floor,
                 deal_price,
-                formatted_trade_year_month,
+                trade_date,
                 payload,
                 created_at,
                 updated_at
             )
             VALUES %s
+            ON CONFLICT (complex_no, area_no, floor, deal_price, trade_date) DO NOTHING
         """
         with conn.cursor() as cursor:
             execute_values(cursor, insert_sql, records)
         conn.commit()
+        logger.info(f"Successfully committed {len(records)} real_price records")
 
     def get_complex_pyeongs(self, complex_nos: Sequence[int | str]) -> dict[str, list]:
         """단지별 pyeong 정보 조회 (실거래가 수집 시 필요)"""
@@ -360,15 +384,12 @@ class CustomPostgresHook(BaseHook):
 
         query = """
             SELECT
-                SUBSTRING(payload->>'formattedTradeYearMonth', 1, 4) as year,
-                SUBSTRING(payload->>'formattedTradeYearMonth', 6, 2) as month,
-                CAST(payload->>'tradeDate' as INTEGER) as day
+                EXTRACT(YEAR FROM trade_date)::TEXT as year,
+                EXTRACT(MONTH FROM trade_date)::TEXT as month,
+                EXTRACT(DAY FROM trade_date)::INTEGER as day
             FROM raw.real_prices
             WHERE complex_no = %s AND area_no = %s
-            ORDER BY
-                SUBSTRING(payload->>'formattedTradeYearMonth', 1, 4) DESC,
-                SUBSTRING(payload->>'formattedTradeYearMonth', 6, 2) DESC,
-                CAST(payload->>'tradeDate' as INTEGER) DESC
+            ORDER BY trade_date DESC
             LIMIT 1
         """
         with conn.cursor() as cursor:
@@ -405,21 +426,3 @@ class CustomPostgresHook(BaseHook):
                 return None
             return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
         return None
-
-    @staticmethod
-    def _generate_real_price_id(doc: Mapping[str, Any]) -> str:
-        """
-        실거래가 데이터 ID 생성
-        Format: {complexNo}_{tradeType}_{YYYYMMDD}_{random_hash}
-        예: 236_A1_20250530_a3f2c1d8
-        """
-        complex_no = doc.get("complexNo") or doc.get("complex_no") or "unknown"
-        trade_type = doc.get("tradeType") or "A1" # 디폴트 매매, 추후 전세 등 확장 예정
-
-        # 거래연월일 조합
-        trade_date = (doc.get("formattedTradeYearMonth") or "").replace(".", "")
-
-        # 랜덤 해시 (8자리)
-        random_hash = uuid.uuid4().hex[:8]
-
-        return f"{complex_no}_{trade_type}_{trade_date}_{random_hash}"
