@@ -569,17 +569,8 @@ def fetch_complex_real_price_recent(
     first_of_last_month = last_month_last_day.replace(day=1)
 
     # 날짜 범위 설정: 지난 달 1일 ~ 실행일
-    start_year = str(first_of_last_month.year)
-    start_month = str(first_of_last_month.month)
-    start_day = 1
-
-    end_year = execution_year
-    end_month = execution_month
-    end_day = execution_day
-
-    # 시작/종료 날짜를 정수로 변환 (비교 편의)
-    start_date_int = int(start_year) * 10000 + int(start_month) * 100 + start_day
-    end_date_int = int(end_year) * 10000 + int(end_month) * 100 + end_day
+    start_date = first_of_last_month
+    end_date = exec_date
 
     result = []
 
@@ -608,16 +599,20 @@ def fetch_complex_real_price_recent(
                     trade_base_month = sold_month_info.get("tradeBaseMonth", '0')
 
                     try:
-                        month_date_int = int(trade_base_year) * 10000 + int(trade_base_month) * 100
+                        year = int(trade_base_year)
+                        month = int(trade_base_month)
                     except (ValueError, TypeError):
                         continue
 
+                    # 월 기준으로 빠른 필터링 (범위 밖이면 스킵/종료)
+                    month_first_day = date(year, month, 1)
+
                     # 범위보다 미래 월 → 스킵
-                    if month_date_int > end_date_int:
+                    if month_first_day > end_date:
                         continue
 
                     # 범위보다 과거 월 → 종료
-                    if month_date_int < (int(start_year) * 10000 + int(start_month) * 100):
+                    if month_first_day < start_date.replace(day=1):
                         stop_collection = True
                         break
 
@@ -628,18 +623,17 @@ def fetch_complex_real_price_recent(
 
                         trade_date_str = sold_info.get("tradeDate", "0")
                         try:
-                            trade_date = int(trade_date_str)
+                            day = int(trade_date_str)
+                            trade_date = date(year, month, day)
                         except (ValueError, TypeError):
                             continue
 
-                        # 전체 날짜를 정수로 변환
-                        full_date_int = month_date_int + trade_date
-
                         # 범위 체크
-                        if start_date_int <= full_date_int <= end_date_int:
+                        if start_date <= trade_date <= end_date:
                             sold_info['complexNo'] = complex_no
                             sold_info['areaNo'] = area_no
                             sold_info['pyeong'] = pyeong_dict.get("pyeongName2", "")
+                            
                             result.append(sold_info)
 
                 # 종료 조건

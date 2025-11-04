@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Any, Mapping
 
 import psycopg2
@@ -242,10 +242,10 @@ class CustomPostgresHook(BaseHook):
         for doc in docs:
             complex_no = doc.get("complexNo") or doc.get("complex_no")
             area_no = doc.get("areaNo") or doc.get("area_no")
-            formatted = doc.get("formattedTradeYearMonth") or doc.get("formatted_trade_year_month")
-            trade_date_str = doc.get("tradeDate")
+            formatted = doc.get("formattedTradeYearMonth") # '2025.10.21'
+            # trade_date_str = doc.get("tradeDate")
 
-            if complex_no is None or area_no is None or formatted is None or trade_date_str is None:
+            if complex_no is None or area_no is None or formatted is None:
                 skipped_count += 1
                 if skipped_count == 1:  # 첫 스킵 데이터만 로그
                     import logging
@@ -258,13 +258,10 @@ class CustomPostgresHook(BaseHook):
             floor = doc.get("floor")
             deal_price = doc.get("dealPrice") or doc.get("deal_price")
 
-            # trade_date 생성: formattedTradeYearMonth (2025.10.21) → 2025-10-21
+            # trade_date 생성: formattedTradeYearMonth (2025.10.21) → date 객체
             try:
-                trade_date = formatted.replace(".", "-")  # "2025.10.21" -> "2025-10-21"
-
-                # 날짜 유효성 검증
-                from datetime import date as dt_date
-                dt_date.fromisoformat(trade_date)  # 유효하지 않으면 ValueError
+                trade_date_str = formatted.replace(".", "-")  # "2025.10.21" -> "2025-10-21"
+                trade_date = date.fromisoformat(trade_date_str)  # date 객체로 변환
             except (ValueError, AttributeError):
                 continue
 
@@ -309,6 +306,7 @@ class CustomPostgresHook(BaseHook):
             execute_values(cursor, insert_sql, records)
         conn.commit()
         logger.info(f"Successfully committed {len(records)} real_price records")
+
 
     def get_complex_pyeongs(self, complex_nos: Sequence[int | str]) -> dict[str, list]:
         """단지별 pyeong 정보 조회 (실거래가 수집 시 필요)"""
