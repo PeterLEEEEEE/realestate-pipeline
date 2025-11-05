@@ -38,19 +38,19 @@ def realestate_api_postgres_dag():
         id_chunks = chunk_complex_ids(complex_ids)
 
         # 3. 매물 데이터 수집 (동적 Task Mapping)
-        # ApiToPostgresOperator.partial(
-        #     task_id="fetch_articles_postgres",
-        #     postgres_conn_id="postgres_default",
-        #     trade_type="A1",  # 매매
-        #     pool="api_pool",  # API rate limiting
-        #     max_pages=5,
-        #     page_sleep_ms_min=10,
-        #     page_sleep_ms_max=15,
-        #     retries=3,
-        #     retry_delay=duration(minutes=5),
-        #     retry_exponential_backoff=True,
-        #     max_retry_delay=duration(minutes=30),
-        # ).expand(complex_nos=id_chunks)
+        ApiToPostgresOperator.partial(
+            task_id="fetch_articles_postgres",
+            postgres_conn_id="postgres_default",
+            trade_type="A1",  # 매매
+            pool="api_pool",  # API rate limiting
+            max_pages=5,
+            page_sleep_ms_min=10,
+            page_sleep_ms_max=15,
+            retries=3,
+            retry_delay=duration(minutes=5),
+            retry_exponential_backoff=True,
+            max_retry_delay=duration(minutes=30),
+        ).expand(complex_nos=id_chunks)
 
         # 4. 단지 상세정보 수집 (동적 Task Mapping)
         # ComplexDetailPostgresOperator.partial(
@@ -67,9 +67,9 @@ def realestate_api_postgres_dag():
             postgres_conn_id="postgres_default",
             pool="api_pool",  # API rate limiting
             retries=3,
-            sleep_min_sec=3,
-            sleep_max_sec=7,
-            filter_by_execution_date=False,  # 증분 수집 모드: 지난 달 1일 ~ 오늘
+            sleep_min_sec=10,
+            sleep_max_sec=15,
+            filter_by_execution_date=True,  # 증분 수집 모드: 지난 달 1일 ~ 오늘
             retry_delay=duration(minutes=10),
             retry_exponential_backoff=True,
             max_retry_delay=duration(minutes=30),

@@ -4,7 +4,7 @@ import random
 import httpx
 import asyncio
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from src.utils.urls import (
     BASE_URL,
     complex_metadata_url,
@@ -184,6 +184,8 @@ def fetch_articles_for_areas(
     max_pages: int = 3, # 지금은 안쓰긴 하는데 rate limit 때문에 일단 남겨둠
     sleep_ms_min: int = 10,
     sleep_ms_max: int = 15,
+    order_type: str = 'dateDesc',
+    is_batch: bool = False # 처음 전체 데이터 수집인 경우 True
 ) -> list[dict]:
     """
     단일 complex의 특정 평형들(area_nos)에 대해 매물 리스트 수집.
@@ -203,9 +205,9 @@ def fetch_articles_for_areas(
     articles = []
     area_nos_str = ":".join(map(str, area_nos))
     page_no = 1
-
+    
     while True:
-        url = f"{BASE_URL + complex_articles_url.format(complex_no=complex_id, trade_type=trade_type, area_nos=area_nos_str, page_no=page_no, order_type='prc')}"
+        url = f"{BASE_URL + complex_articles_url.format(complex_no=complex_id, trade_type=trade_type, area_nos=area_nos_str, page_no=page_no, order_type=order_type)}"
         try:
             resp = client.get(url)
             resp.raise_for_status()
@@ -217,7 +219,41 @@ def fetch_articles_for_areas(
         if not article_list:
             break
 
+        original_count = len(article_list)
+
+        if is_batch is False:
+
+            # 현재 날짜 (KST) 기준 일주일 전
+            now_kst = datetime.now()
+            one_week_ago = (now_kst - timedelta(days=7)).date()
+
+            filtered_articles = []
+            for article in article_list:
+                confirm_ymd = article.get("articleConfirmYmd")
+                if confirm_ymd and isinstance(confirm_ymd, str) and len(confirm_ymd) == 8:
+                    try:
+                        # articleConfirmYmd를 date로 변환 (이미 KST)
+                        confirm_date = datetime.strptime(confirm_ymd, "%Y%m%d").date()
+
+                        if confirm_date >= one_week_ago:
+                            filtered_articles.append(article)
+                        else:
+                            # 일주일보다 과거 데이터 발견, 이후 데이터는 무시
+                            break
+                    except ValueError:
+                        # 날짜 파싱 실패 시 그냥 추가
+                        filtered_articles.append(article)
+                else:
+                    # articleConfirmYmd가 없거나 형식이 다르면 그냥 추가
+                    filtered_articles.append(article)
+
+            article_list = filtered_articles
+
         articles.extend(article_list)
+
+        # 원본보다 적게 추가되었다면 일주일 이전 데이터를 만난 것이므로 중단
+        if is_batch is False and len(article_list) < original_count:
+            break
 
         if data.get("isMoreData") is False:
             break
