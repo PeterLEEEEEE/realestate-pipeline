@@ -12,7 +12,8 @@ from src.utils.urls import (
     complex_limit_price_url,
     complex_real_price_url,
     complex_name_url,
-    complex_articles_url
+    complex_articles_url,
+    complex_dong_list_url
 )
 from src.models.model import RealEstateComplex
 from src.utils.headers import get_cookies_headers
@@ -684,3 +685,26 @@ def fetch_complex_real_price_recent(
                 break
 
     return result
+
+
+def fetch_dong_info(
+    client: httpx.Client,
+    complex_id: int | str,
+    sleep_min_sec: int = 1,
+    sleep_max_sec: int = 1
+) -> dict:
+    """
+    단일 complex의 동별 호수 정보를 반환.
+    """
+
+    url = f"{BASE_URL + complex_dong_list_url.format(complex_no=complex_id)}"
+
+    try:
+        resp = client.get(url)
+        resp.raise_for_status()
+        data = resp.json()
+
+        time.sleep(random.randint(sleep_min_sec, sleep_max_sec))
+        return data
+    except httpx.HTTPError:
+        return {}

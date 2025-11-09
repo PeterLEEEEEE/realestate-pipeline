@@ -12,7 +12,7 @@ from operators.api_to_postgres_ops import (
 @dag(
     dag_id="dags_realestate_api_to_postgres",
     start_date=datetime(2023, 4, 1, tz="Asia/Seoul"),
-    schedule="0 23 * * *",
+    schedule="0 22 * * *",
     catchup=False,
     tags=["realestate", "daily", "postgres"],
     description="네이버 부동산 API에서 매일 실거래가 증분 수집",
@@ -44,6 +44,7 @@ def realestate_api_postgres_dag():
             trade_type="A1",  # 매매
             pool="api_pool",  # API rate limiting
             max_pages=5,
+            is_batch=False,
             page_sleep_ms_min=10,
             page_sleep_ms_max=15,
             retries=3,
@@ -70,9 +71,9 @@ def realestate_api_postgres_dag():
             sleep_min_sec=10,
             sleep_max_sec=15,
             filter_by_execution_date=True,  # 증분 수집 모드: 지난 달 1일 ~ 오늘
-            retry_delay=duration(minutes=10),
+            retry_delay=duration(minutes=3),
             retry_exponential_backoff=True,
-            max_retry_delay=duration(minutes=30),
+            max_retry_delay=duration(minutes=5),
         ).expand(complex_nos=id_chunks)
 
     realestate_api_pipeline()

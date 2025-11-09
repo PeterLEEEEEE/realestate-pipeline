@@ -121,3 +121,29 @@ article_price_history_url = "/article-price-history/{article_no}"
 ]
 }
 """
+
+# 동 정보 API (아파트 상세 API에는 층 정보가 안옴)
+complex_dong_list_url = "/complexes/{complex_no}/buildings/list"
+"""데이터 예시
+{
+    "buildingList": [
+        {
+            "dongNo": "1",
+            "bildName": "101",
+            "highFloor": 13,
+            "lowFloor": 1,
+            "sortNo": "101101"
+        },
+        {
+            "dongNo": "2",
+            "bildName": "102",
+            "highFloor": 31,
+            "lowFloor": 1,
+            "sortNo": "102102"
+        },
+    ]
+}
+
+"""
+# 각 호수에 대한 평 정보 API - 매물이나 실거래가 데이터에 호수에 대한 정보는 없어서 수집이 필요한지는 고민중
+complex_dong_ho_list_url = "/complexes/{complex_no}/buildings/pyeongtype?dongNo={dong_no}&complexNo={complex_no}"

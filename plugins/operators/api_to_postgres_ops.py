@@ -20,6 +20,7 @@ class ApiToPostgresOperator(BaseOperator):
         trade_type: str = "A1",
         page_no: int = 1,
         max_pages: int = 3,
+        is_batch: bool = False,
         page_sleep_ms_min: int = 8,
         page_sleep_ms_max: int = 15,
         **kwargs,
@@ -30,6 +31,7 @@ class ApiToPostgresOperator(BaseOperator):
         self.trade_type = trade_type
         self.page_no = page_no
         self.max_pages = max_pages
+        self.is_batch = is_batch
         self.page_sleep_ms_min = page_sleep_ms_min
         self.page_sleep_ms_max = page_sleep_ms_max
 
@@ -84,6 +86,7 @@ class ApiToPostgresOperator(BaseOperator):
                         area_nos=chunk,
                         trade_type=self.trade_type,
                         max_pages=self.max_pages,
+                        is_batch=self.is_batch,
                         sleep_ms_min=self.page_sleep_ms_min,
                         sleep_ms_max=self.page_sleep_ms_max,
                     )
@@ -140,7 +143,7 @@ class ComplexDetailPostgresOperator(BaseOperator):
         self.sleep_max_sec = sleep_max_sec
 
     def execute(self, context):
-        from src.core.fetch import fetch_complex_detail
+        from src.core.fetch import fetch_complex_detail, fetch_dong_info
         from src.utils.headers import get_cookies_headers
 
         pg_hook = CustomPostgresHook(self.postgres_conn_id)
@@ -164,6 +167,18 @@ class ComplexDetailPostgresOperator(BaseOperator):
                 if detail:
                     if not detail.get("complexNo"):
                         detail["complexNo"] = str(cid)
+                    dong_info = fetch_dong_info(
+                        client=client,
+                        complex_id=cid,
+                    )
+                    if "buildingList" not in dong_info:
+                        self.log.warning(
+                            "complex=%s dong_info response: %s",
+                            cid,
+                            dong_info
+                        )
+                    else:
+                        detail["dongs"] = dong_info.get("buildingList", [])
                     details.append(detail)
 
         if details:
