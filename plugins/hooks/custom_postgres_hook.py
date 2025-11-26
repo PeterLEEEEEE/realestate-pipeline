@@ -345,22 +345,49 @@ class CustomPostgresHook(BaseHook):
 
         return results
 
-    def get_target_complex_ids(self, household_count: int = 1000) -> list[str]:
+    def get_target_complex_ids(
+        self,
+        household_count: int = 1000,
+        regions: list[str] | None = None,
+    ) -> list[str]:
         """
         매일 수집 대상 단지 ID 조회
-        totalHouseholdCount >= household_count인 단지만 반환
+
+        Args:
+            household_count: 최소 세대수 (기본값: 1000)
+            regions: 지역 필터 리스트 (예: ["서울시 성동구", "서울시 강남구"])
+                     None이면 전체 지역
+
+        Returns:
+            단지 ID 리스트
         """
         conn = self.get_conn()
         self.ensure_tables()
 
-        query = """
-            SELECT complex_no
-            FROM raw.complexes
-            WHERE (payload->>'totalHouseholdCount')::int >= %s
-            ORDER BY complex_no
-        """
+        if regions:
+            # 지역 필터가 있는 경우
+            region_conditions = " OR ".join(
+                "payload->>'cortarAddress' LIKE %s" for _ in regions
+            )
+            query = f"""
+                SELECT complex_no
+                FROM raw.complexes
+                WHERE (payload->>'totalHouseholdCount')::int >= %s
+                  AND ({region_conditions})
+                ORDER BY complex_no
+            """
+            params = [household_count] + [f"%{region}%" for region in regions]
+        else:
+            query = """
+                SELECT complex_no
+                FROM raw.complexes
+                WHERE (payload->>'totalHouseholdCount')::int >= %s
+                ORDER BY complex_no
+            """
+            params = [household_count]
+
         with conn.cursor() as cursor:
-            cursor.execute(query, (household_count,))
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall()
 
         return [row[0] for row in rows]

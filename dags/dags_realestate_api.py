@@ -9,6 +9,12 @@ from operators.api_to_postgres_ops import (
 )
 
 
+# 수집 대상 지역 (None이면 전체)
+TARGET_REGIONS = [
+    # "서울시 성동구",
+]
+IS_BATCH = False # 배치 모드 or 증분 모드
+
 @dag(
     dag_id="dags_realestate_api_to_postgres",
     start_date=datetime(2023, 4, 1, tz="Asia/Seoul"),
@@ -31,8 +37,8 @@ def realestate_api_postgres_dag():
 
     @task_group(group_id="realestate_api_postgres_pipeline")
     def realestate_api_pipeline():
-        # 1. 수집 대상 단지 ID 조회
-        complex_ids = get_target_complex_ids_task()
+        # 1. 수집 대상 단지 ID 조회 (지역 필터 적용)
+        complex_ids = get_target_complex_ids_task(regions=TARGET_REGIONS)
 
         # 2. 10개씩 청크로 나눔
         id_chunks = chunk_complex_ids(complex_ids)
@@ -44,7 +50,7 @@ def realestate_api_postgres_dag():
             trade_type="A1",  # 매매
             pool="api_pool",  # API rate limiting
             max_pages=5,
-            is_batch=False,
+            is_batch=IS_BATCH,
             page_sleep_ms_min=10,
             page_sleep_ms_max=15,
             retries=3,
@@ -68,9 +74,9 @@ def realestate_api_postgres_dag():
             postgres_conn_id="postgres_default",
             pool="api_pool",  # API rate limiting
             retries=3,
-            sleep_min_sec=10,
+            sleep_min_sec=5,
             sleep_max_sec=15,
-            filter_by_execution_date=True,  # 증분 수집 모드: 지난 달 1일 ~ 오늘
+            filter_by_execution_date=not IS_BATCH,  # 증분 수집 모드: 지난 달 1일 ~ 오늘
             retry_delay=duration(minutes=3),
             retry_exponential_backoff=True,
             max_retry_delay=duration(minutes=5),
