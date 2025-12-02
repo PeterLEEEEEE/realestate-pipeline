@@ -11,7 +11,9 @@ from operators.api_to_postgres_ops import (
 
 # 수집 대상 지역 (None이면 전체)
 TARGET_REGIONS = [
-    # "서울시 성동구",
+    # "서울시 노원구",
+    # "서울시 강서구",
+    # "서울시 강북구",
 ]
 IS_BATCH = False # 배치 모드 or 증분 모드
 
@@ -41,7 +43,7 @@ def realestate_api_postgres_dag():
         complex_ids = get_target_complex_ids_task(regions=TARGET_REGIONS)
 
         # 2. 10개씩 청크로 나눔
-        id_chunks = chunk_complex_ids(complex_ids)
+        id_chunks = chunk_complex_ids(ids=complex_ids, chunk_size=5)
 
         # 3. 매물 데이터 수집 (동적 Task Mapping)
         ApiToPostgresOperator.partial(
@@ -74,8 +76,8 @@ def realestate_api_postgres_dag():
             postgres_conn_id="postgres_default",
             pool="api_pool",  # API rate limiting
             retries=3,
-            sleep_min_sec=5,
-            sleep_max_sec=15,
+            sleep_min_sec=10,
+            sleep_max_sec=20,
             filter_by_execution_date=not IS_BATCH,  # 증분 수집 모드: 지난 달 1일 ~ 오늘
             retry_delay=duration(minutes=3),
             retry_exponential_backoff=True,

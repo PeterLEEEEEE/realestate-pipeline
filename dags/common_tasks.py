@@ -31,7 +31,7 @@ def get_target_complex_ids_task(
 
 
 @task(task_id="chunk_complex_ids")
-def chunk_complex_ids(ids: list[str], chunk_size: int = 10) -> list[list[str]]:
+def chunk_complex_ids(ids: list[str], chunk_size: int = 5) -> list[list[str]]:
     """
     단지 ID 리스트를 chunk_size 개씩 나눔
     동적 Task Mapping을 위한 청킹
